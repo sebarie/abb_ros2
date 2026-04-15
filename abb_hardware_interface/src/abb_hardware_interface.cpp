@@ -98,7 +98,7 @@ CallbackReturn ABBSystemHardware::on_init(const hardware_interface::HardwareInfo
 
     // Get robot controller description from RWS
     abb::robot::RWSManager rws_manager(rws_ip, rws_port, "Default User", "robotics");
-    robot_controller_description_ = abb::robot::utilities::establishRWSConnection(rws_manager, "IRB1200", true);
+    robot_controller_description_ = abb::robot::utilities::establishRWSConnection(rws_manager, "", true);
   }
   else
   {
@@ -207,53 +207,6 @@ CallbackReturn ABBSystemHardware::on_init(const hardware_interface::HardwareInfo
   return CallbackReturn::SUCCESS;
 }
 
-std::vector<hardware_interface::StateInterface> ABBSystemHardware::export_state_interfaces()
-{
-  std::vector<hardware_interface::StateInterface> state_interfaces;
-  for (auto& group : motion_data_.groups)
-  {
-    for (auto& unit : group.units)
-    {
-      for (auto& joint : unit.joints)
-      {
-        // TODO(seng): Consider changing joint names in robot description to match what comes
-        // from the ABB robot description to avoid needing to strip the prefix here
-        const auto pos = joint.name.find("joint");
-        const auto joint_name = joint.name.substr(pos);
-        state_interfaces.emplace_back(
-            hardware_interface::StateInterface(joint_name, hardware_interface::HW_IF_POSITION, &joint.state.position));
-        state_interfaces.emplace_back(
-            hardware_interface::StateInterface(joint_name, hardware_interface::HW_IF_VELOCITY, &joint.state.velocity));
-      }
-    }
-  }
-  return state_interfaces;
-}
-
-std::vector<hardware_interface::CommandInterface> ABBSystemHardware::export_command_interfaces()
-{
-  std::vector<hardware_interface::CommandInterface> command_interfaces;
-  for (auto& group : motion_data_.groups)
-  {
-    for (auto& unit : group.units)
-    {
-      for (auto& joint : unit.joints)
-      {
-        // TODO(seng): Consider changing joint names in robot description to match what comes
-        // from the ABB robot description to avoid needing to strip the prefix here
-        const auto pos = joint.name.find("joint");
-        const auto joint_name = joint.name.substr(pos);
-        command_interfaces.emplace_back(hardware_interface::CommandInterface(
-            joint_name, hardware_interface::HW_IF_POSITION, &joint.command.position));
-        command_interfaces.emplace_back(hardware_interface::CommandInterface(
-            joint_name, hardware_interface::HW_IF_VELOCITY, &joint.command.velocity));
-      }
-    }
-  }
-
-  return command_interfaces;
-}
-
 CallbackReturn ABBSystemHardware::on_activate(const rclcpp_lifecycle::State& /* previous_state */)
 {
   size_t counter = 0;
@@ -283,8 +236,8 @@ CallbackReturn ABBSystemHardware::on_activate(const rclcpp_lifecycle::State& /* 
     {
       for (auto& joint : unit.joints)
       {
-        joint.command.position = joint.state.position;
-        joint.command.velocity = 0.0;
+        set_command(joint.name + "/" + hardware_interface::HW_IF_POSITION, joint.state.position);
+        set_command(joint.name + "/" + hardware_interface::HW_IF_VELOCITY, 0.0);
       }
     }
   }
@@ -297,11 +250,33 @@ CallbackReturn ABBSystemHardware::on_activate(const rclcpp_lifecycle::State& /* 
 return_type ABBSystemHardware::read(const rclcpp::Time& time, const rclcpp::Duration& period)
 {
   egm_manager_->read(motion_data_);
+  for (auto& group : motion_data_.groups)
+  {
+    for (auto& unit : group.units)
+    {
+      for (auto& joint : unit.joints)
+      {
+        set_state(joint.name + "/" + hardware_interface::HW_IF_POSITION, joint.state.position);
+        set_state(joint.name + "/" + hardware_interface::HW_IF_VELOCITY, joint.state.velocity);
+      }
+    }
+  }
   return return_type::OK;
 }
 
 return_type ABBSystemHardware::write(const rclcpp::Time& time, const rclcpp::Duration& period)
 {
+  for (auto& group : motion_data_.groups)
+  {
+    for (auto& unit : group.units)
+    {
+      for (auto& joint : unit.joints)
+      {
+        joint.command.position = get_command(joint.name + "/" + hardware_interface::HW_IF_POSITION);
+        joint.command.velocity = get_command(joint.name + "/" + hardware_interface::HW_IF_VELOCITY);      
+      }
+    }
+  }
   egm_manager_->write(motion_data_);
   return return_type::OK;
 }
